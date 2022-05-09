@@ -1,0 +1,7 @@
+boto3==1.20.46
+pdfplumber==0.6.0
+pymysql==1.0.2
+spacy==3.2.1
+sec-api==1.0.9
+urllib3==1.26.8
+thefuzz==0.19.0
