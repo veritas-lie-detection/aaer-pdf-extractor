@@ -3,7 +3,7 @@
 
 ### Overview
 ##### Note: Currently scraping information stored in .html domains is not supported.
-This code takes the information stored in AuroraMySQL by **aaer-table-scraping** and attempts to extract information used to identify investor harm. The information extracted are stored in a DynamoDB with their descriptors below:
+This code takes the information stored in AuroraMySQL by [**aaer-table-scraping**](https://github.com/veritas-lie-detection/aaer-table-scraping) and attempts to extract information used to identify investor harm. The information extracted are stored in a DynamoDB with their descriptors below:
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
