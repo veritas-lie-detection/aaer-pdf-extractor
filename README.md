@@ -17,6 +17,7 @@ This code takes the information stored in AuroraMySQL by **aaer-table-scraping**
 | month_start | int | The month fraudulent activity for the company started. |
 | year_end | int | The year fraudulent activity for the company ended. |
 | month_end | int | The month fraudulent activity for the company ended. |
+| scraped | bool | Whether the 10-Ks of fraud have been collected. |
 
 ### Methodology
 The most important information to extract from each AAER is the company name along with the start and end date of fraudulent activity. Company names are taken from AAERs by searching for business entity terms (e.g. LLC, CORP, INC). These company names are then fed through fuzzy string matching [SEC API](https://sec-api.io/)) to attain their CIK and ticker. Dates are extracted using Spacy, then filtered to be within 2 standard deviation from the mean (should change to median) to remove outliers.
