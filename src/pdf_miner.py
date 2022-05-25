@@ -9,12 +9,30 @@ import urllib3
 import io
 import os
 import time
+from typing import Dict, List, Optional, Tuple
 
 from nlp_engine import parse_text
 
 
 class PDFReader:
+    """Extracts relevant information from AAERs.
+
+    Attributes:
+        nlp_engine: Spacy NLP processer for text.
+        url: URL of AAER.
+        text: All words in the AAER.
+        bold_words: All bolded words of the AAER.
+        section: The starting section (i.e. IN THE MATTER OF...) of the AAER.
+        section_start: The index which the section starts in text.
+        section_end: The index which the section ends in text.
+        contains_21c: Whether or not the document states the company posed risk to investors.
+        summary: The summary section of the AAER.
+        sum_start: The index which the summary section starts in text.
+        sum_end: The index which the summary section ends in text.
+        company_name: The name of the company the AAER references. 
+    """
     def __init__(self, url: str, nlp_engine=None):
+        """Inits PDFReader with AAER document information."""
         if nlp_engine is None:
             self.nlp_engine = spacy.load("en_core_web_md")
 
@@ -26,7 +44,20 @@ class PDFReader:
         self.company_name = self.get_company_name()
 
     @staticmethod
-    def find_substring(text, start, end):
+    def find_substring(text: str, start: str, end: str) -> Tuple[int, int]:
+        """Finds the start and end index of a sub-string given starting and ending sequences.
+
+        Args:
+            text: The string to find the start and end sequence in.
+            start: The starting sequence.
+            end: The ending sequence.
+
+        Returns:
+            The start and end index.
+
+        Raises:
+            IndexError: If either the start or end sequence can't be found.
+        """
         text = text.lower()
         start_index = text.find(start.lower())
         if start_index == -1:
@@ -42,6 +73,7 @@ class PDFReader:
         return start_index, start_index + end_index
 
     def extract_pdf_from_url(self):
+        """Gets text from a url of an AAER."""
         http = urllib3.PoolManager()
         temp = io.BytesIO()
         temp.write(http.request("GET", self.url).data)
@@ -75,14 +107,32 @@ class PDFReader:
 
         return all_text, bold_words
 
-    def get_section_portion(self, start_sequence="In", end_sequence="I."):
-        # lawsuits' header section normally begins with "In the matter of" and ends in "I. The Securities and Exch..."
+    def get_section_portion(self, start_sequence="In": str, end_sequence="I.": str) -> Tuple[str, int, int]:
+        """Finds the section portion of the AAER.
+
+        Args:
+            start_sequence: The text that denotes the start of the section portion.
+            end_sequence: The text that denotes the end of the section portion.
+
+        Returns:
+            Section text, along with its start and end index in the document.
+        """
+        # lawsuits' header section normally is bolded and begins with "In the matter of" and ends in "I. The Securities and Exch..."
         start_index = self.bold_words[start_sequence.lower()][0]
         end_index = self.bold_words[end_sequence.lower()][0] - 1
 
         return self.text[start_index:end_index].strip(), start_index, end_index
 
-    def get_summary_portion(self, start_sequence="Summary", end_sequence="Respondent"):  # summary is always (?) section 3
+    def get_summary_portion(self, start_sequence="Summary": str, end_sequence="Respondent": str) -> Tuple[str, int, int]:
+        """Finds the summary portion of the AAER.
+
+        Args:
+            start_sequence: The text that denotes the start of the summary portion.
+            end_sequence: The text that denotes the end of the summary portion.
+
+        Returns:
+            Summary text, along with its start and end index in the document.
+        """
         # the summary portion shouldn't be in the section portion
         if start_sequence.lower() in self.bold_words:
             sum_start_index = self.bold_words[start_sequence.lower()][0]
@@ -91,14 +141,15 @@ class PDFReader:
         
         sum_end_index = i = 0
         if end_sequence.lower() not in self.bold_words or self.bold_words[end_sequence.lower()][-1] < sum_start_index:
-            end_sequence += "s"
+            end_sequence += "s"  # sometimes the word is plural
+
         if end_sequence.lower() not in self.bold_words or self.bold_words[end_sequence.lower()][-1] < sum_start_index:
             sum_end_index = sum_start_index + 10000000
-            for key in self.bold_words:
+            for key in self.bold_words:  # find the next bolded word, which likely denotes a new section
                 for index in self.bold_words[key]:
                     if sum_end_index > index > sum_start_index:
                         sum_end_index = index
-        else:
+        else:  # the word is bolded
             while sum_end_index < sum_start_index:
                 sum_end_index = self.bold_words[end_sequence.lower()][i] - 1
                 i += 1
@@ -110,30 +161,35 @@ class PDFReader:
 
         return self.text[sum_start_index:sum_end_index], sum_start_index, sum_end_index
 
-    def check_21c(self):
+    def check_21c(self) -> bool:
+        """Basic check to see if 21C exists in the section."""
         if "21c" in self.section.lower():
             return True
         return False
 
-    def get_company_name_from_section(self):
-        index = self.find_substring(self.section, "In the Matter of", "Respondent")
-        title_name = self.section[index[0]+16:index[1]].strip()
-        comp_indicators = ["LLP", "LLC", "CORP", "INC"]
-        if any(x in title_name.upper() for x in comp_indicators):
-            temp = title_name.split("and")
-            if len(temp) == 1:
-                return title_name
-            for i in temp:
-                if any(x in i.upper() for x in comp_indicators):
-                    return i
+    def get_company_name_from_section(self) -> Optional[str]:
+        """Attempts to find a company name from the section."""
+        start_index, end_index = self.find_substring(self.section, "In the Matter of", "Respondent")
+        title_name = self.section[start_index + 16:end_index].strip()
 
-    def get_company_name(self):
+        comp_indicators = ["LLP", "LLC", "CORP", "INC"]
+        if any(indicator in title_name.upper() for indicator in comp_indicators):
+            entities = title_name.split("and")
+            if len(entities) == 1:
+                return title_name
+
+            for entity in entities:
+                if any(indicator in entity.upper() for indicator in comp_indicators):
+                    return entity
+
+    def get_company_name(self) -> Optional[str]:
+        """Attempts to find a company name from the entire text."""
         comp_indicators = [" LTD", " LLC", " CORP", " INC", " LIMITED", " INTERNATIONAL", " CO."]
         doc = self.nlp_engine(self.text)
         company = None
         for ent in doc.ents:
             if ent.label_ == "ORG":
-                if any(x in ent.text.upper() for x in comp_indicators):
+                if any(indicator in ent.text.upper() for indicator in comp_indicators):
                     if company is None:
                         company = ent.text.upper()
                     elif fuzz.token_set_ratio(company.split()[0], ent.text.upper().split()[0]) > .9:
@@ -143,7 +199,15 @@ class PDFReader:
         return company
 
 
-def get_urls_from_db(rds_cursor):
+def get_urls_from_db(rds_cursor) -> List[Tuple[str, str]]:
+    """Gets unscraped AAER URLs from MySQL.
+
+    Args:
+        rds_cursor: RDS connector object.
+
+    Returns:
+        Unscraped AAER URLs and its corresponding respondents.
+    """
     rds_cursor.execute(
         f"""SELECT url, respondents FROM {os.environ["TABLE"]} WHERE scraped = 0;"""
     )
@@ -152,13 +216,22 @@ def get_urls_from_db(rds_cursor):
     return values[::-1]
 
 
-def set_scraped_db(rds_cursor, url):
+def set_scraped_db(rds_cursor, url: str) -> None:
+    """Update scraped URL in MySQL."""
     rds_cursor.execute(
         f"""UPDATE {os.environ["TABLE"]} SET scraped = 1 WHERE url = '{url}';"""
     )
 
 
-def add_to_dynamo(dynamodb, item):
+def add_to_dynamo(dynamodb, item: Dict) -> bool:
+    """Attempts to add an item to DynamoDB.
+
+    Args:
+        item: The item to add.
+
+    Returns:
+        Whether or not the item was added successfully.
+    """
     table = dynamodb.Table(os.environ["DYNAMO_TABLE"])
     response = table.put_item(Item=item)
     if "ResponseMetadata" in response and response["ResponseMetadata"]["HTTPStatusCode"] == 200:
@@ -166,7 +239,15 @@ def add_to_dynamo(dynamodb, item):
     return False
 
 
-def get_company_info(query_api, company_name):
+def get_company_info(query_api, company_name: str) -> Dict:
+    """Uses fuzzy string matching to find a company in the SEC API and get its info.
+
+    Args:
+        company_name: The name of the company found in the AAER.
+
+    Returns:
+        SEC query API information on the company found in the AAER. 
+    """
     query = {
         "query": {
             "query_string": {
@@ -188,7 +269,15 @@ def get_company_info(query_api, company_name):
     return query_api.get_filings(query)
 
 
-def scrape_pdfs(dyna_conn, rds_cursor, query_api, nlp_model=None):
+def scrape_pdfs(dyna_conn, rds_cursor, query_api, nlp_model=None) -> None:
+    """Scrapes AAERs and adds fraudulent company information to DynamoDB.
+
+    Args:
+        dyna_conn: Connection to AWS DynamoDB object.
+        rds_cursor: Connection to AWS RDS object.
+        query_api: SEC query API connection object.
+        nlp_model: Spacy model to process the AAER with.
+    """
     if nlp_model is None:
         nlp_model = spacy.load("en_core_web_md")
 
@@ -213,7 +302,7 @@ def scrape_pdfs(dyna_conn, rds_cursor, query_api, nlp_model=None):
                     "contains_21c": reader.contains_21c,
                 }
 
-                time_range = parse_text(reader.summary, nlp_model)
+                time_range = parse_text(reader.summary, nlp_model)  # time which the company committed fraud
                 item.update(time_range)
 
                 if add_to_dynamo(dyna_conn, item):
@@ -234,6 +323,7 @@ def scrape_pdfs(dyna_conn, rds_cursor, query_api, nlp_model=None):
 
 
 if __name__ == "__main__":
+    # initialize resources
     dyna = boto3.resource("dynamodb")
     rds_sql_conn = pymysql.connect(
         host=os.environ["ENDPOINT"],
@@ -244,5 +334,6 @@ if __name__ == "__main__":
     )
     cursor = rds_sql_conn.cursor()
     sec_query_api = QueryApi(api_key=os.environ["SEC_API_KEY"])
+
     scrape_pdfs(dyna, cursor, sec_query_api)
     rds_sql_conn.close()
